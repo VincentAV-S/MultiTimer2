@@ -34,11 +34,11 @@
     /* Right: Day timeline */
     .timeline-wrap{padding:12px}
     .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
-    .dayline{position:relative;height:380px;border:1px solid #243040;border-radius:12px;background:linear-gradient(180deg,#0f141a,#0c1016);overflow:hidden}
+    .dayline{position:relative;height:420px;border:1px solid #243040;border-radius:12px;background:linear-gradient(180deg,#0f141a,#0c1016);overflow:hidden}
     .hour-grid{position:absolute;inset:0;display:grid;grid-template-rows:repeat(24,1fr)}
     .hour-grid div{border-top:1px dashed #213;opacity:.8}
     .hour-labels{position:absolute;left:6px;top:0;height:100%;display:grid;grid-template-rows:repeat(24,1fr);pointer-events:none}
-    .hour-labels span{font-size:10px;color:#99a;align-self:start;transform:translateY(-6px)}
+    .hour-labels span{font-size:12px;color:#99a;align-self:start;transform:translateY(-6px)}
     .rows{position:absolute;left:48px;right:8px;top:0;bottom:0}
     .row-track{position:relative;height:calc(100%/var(--rowcount));border-top:1px dashed #1b2430}
     .bar{position:absolute;height:70%;top:15%;border-radius:8px;box-shadow:0 2px 8px #0008;display:flex;align-items:center;padding:0 8px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -47,8 +47,15 @@
     .bar[data-c="2"]{background:#f59e0b}
     .bar[data-c="3"]{background:#ef4444}
     .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-
     .footer{padding:10px 16px;border-top:1px solid #223;font-size:12px;color:#99a}
+
+    /* Sequence mode additions */
+    .toolbar .mode-toggle{display:flex;gap:6px;align-items:center}
+    .zoom{display:flex;align-items:center;gap:8px}
+    .scroll-x{overflow-x:auto; overflow-y:hidden}
+    .track{position:relative;height:64px}
+    .tickbar{position:absolute;inset:0;pointer-events:none}
+    .tickbar div{position:absolute;top:0;bottom:0;border-left:1px dashed #233;opacity:.8}
   </style>
 </head>
 <body>
@@ -82,9 +89,17 @@
           <input id="datePicker" type="date" />
           <button id="nextDay">▶</button>
           <div class="spacer"></div>
-          <span class="muted" id="daySummary"></span>
+          <div class="mode-toggle">
+            <label class="pill"><input type="radio" name="mode" value="sequence" id="modeSeq" checked style="margin-right:6px">Sequence</label>
+            <label class="pill"><input type="radio" name="mode" value="clock" id="modeClock" style="margin-right:6px">Clock</label>
+          </div>
+          <div class="zoom pill" id="zoomWrap" title="Pixels per hour (sequence mode)">
+            <span>Zoom</span>
+            <input id="zoom" type="range" min="200" max="1800" step="50" value="600">
+          </div>
+          <span class="muted" id="daySummary" style="margin-left:8px"></span>
         </div>
-        <div class="dayline" id="dayline">
+        <div class="dayline scroll-x" id="dayline">
           <div class="hour-grid" aria-hidden="true"></div>
           <div class="hour-labels" aria-hidden="true"></div>
           <div class="rows" id="rows"></div>
@@ -100,6 +115,8 @@
   const state = {
     timers: [],
     selectedDate: todayISO(),
+    mode: 'sequence', // 'sequence' | 'clock'
+    pxPerHour: 600,   // used in sequence mode
   };
 
   const LS_KEY = 'multitimer.v1';
@@ -109,7 +126,7 @@
     const y = tz.getFullYear();
     const m = String(tz.getMonth()+1).padStart(2,'0');
     const day = String(tz.getDate()).padStart(2,'0');
-    return `${y}-${m}-${day}`;
+    return \`\${y}-\${m}-\${day}\`;
   }
 
   function save(){
@@ -124,6 +141,8 @@
         state.timers = parsed.timers;
       }
       if(parsed && parsed.selectedDate){ state.selectedDate = parsed.selectedDate; }
+      if(parsed && parsed.mode){ state.mode = parsed.mode; }
+      if(parsed && parsed.pxPerHour){ state.pxPerHour = parsed.pxPerHour; }
     }catch(e){ console.warn('Failed to parse state', e); }
   }
 
@@ -132,7 +151,7 @@
   // ====== Timers CRUD ======
   const timersEl = document.getElementById('timers');
   document.getElementById('addBtn').addEventListener('click', () => {
-    const name = document.getElementById('newName').value.trim() || `Timer ${state.timers.length+1}`;
+    const name = document.getElementById('newName').value.trim() || \`Timer \${state.timers.length+1}\`;
     document.getElementById('newName').value='';
     const t = { id: uid(), name, colorIndex: state.timers.length % 4, running:false, runStart:null, elapsedSec:0, sessions:[] };
     state.timers.push(t); save(); renderTimers(); renderLegend(); renderDay();
@@ -143,7 +162,7 @@
     const h = String(Math.floor(sec/3600)).padStart(2,'0');
     const m = String(Math.floor((sec%3600)/60)).padStart(2,'0');
     const s = String(sec%60).padStart(2,'0');
-    return `${h}:${m}:${s}`;
+    return \`\${h}:\${m}:\${s}\`;
   }
 
   let tickHandle = null;
@@ -179,7 +198,7 @@
     state.timers.forEach(t=>{
       const wrap = document.createElement('div'); wrap.className='timer';
       const name = document.createElement('div'); name.className='name'; name.textContent = t.name;
-      const elapsed = document.createElement('div'); elapsed.className='elapsed'; elapsed.id = `elapsed-${t.id}`; elapsed.style.textAlign='right';
+      const elapsed = document.createElement('div'); elapsed.className='elapsed'; elapsed.id = \`elapsed-\${t.id}\`; elapsed.style.textAlign='right';
       elapsed.textContent = formatHMS( t.elapsedSec + (t.running? (Date.now()-t.runStart)/1000 : 0) );
 
       const controls = document.createElement('div'); controls.className='controls'; controls.style.gridColumn='1 / span 2';
@@ -189,7 +208,7 @@
       const delBtn = document.createElement('button'); delBtn.textContent = 'Delete'; delBtn.onclick = ()=>{ if(confirm('Delete timer and its history?')){ state.timers = state.timers.filter(x=>x.id!==t.id); save(); renderTimers(); renderLegend(); renderDay(); }};
       controls.append(startBtn, stopBtn, resetBtn, delBtn);
 
-      const pill = document.createElement('div'); pill.className='pill muted'; pill.innerHTML = `Color #${t.colorIndex+1}`;
+      const pill = document.createElement('div'); pill.className='pill muted'; pill.innerHTML = \`Color #\${t.colorIndex+1}\`;
 
       wrap.append(name, elapsed, controls, pill);
       timersEl.appendChild(wrap);
@@ -197,7 +216,7 @@
   }
   function renderTimersElapsedOnly(){
     state.timers.forEach(t=>{
-      const el = document.getElementById(`elapsed-${t.id}`);
+      const el = document.getElementById(\`elapsed-\${t.id}\`);
       if(!el) return;
       const nowSec = t.elapsedSec + (t.running? (Date.now()-t.runStart)/1000 : 0);
       el.textContent = formatHMS(nowSec);
@@ -211,12 +230,21 @@
   const datePicker = document.getElementById('datePicker');
   const daySummary = document.getElementById('daySummary');
   const legendEl = document.getElementById('legend');
+  const modeSeq = document.getElementById('modeSeq');
+  const modeClock = document.getElementById('modeClock');
+  const zoom = document.getElementById('zoom');
+  const zoomWrap = document.getElementById('zoomWrap');
 
   function isSelectedToday(){ return state.selectedDate === todayISO(); }
 
   function renderScaffolding(){
     hourGrid.innerHTML = Array.from({length:24},()=>'<div></div>').join('');
-    hourLabels.innerHTML = Array.from({length:24},(_,i)=>`<span>${String(i).padStart(2,'0')}:00</span>`).join('');
+    hourLabels.innerHTML = Array.from({length:24},(_,i)=>\`<span>\${String(i).padStart(2,'0')}:00</span>\`).join('');
+    // Initialize UI controls
+    modeSeq.checked = state.mode === 'sequence';
+    modeClock.checked = state.mode === 'clock';
+    zoom.value = state.pxPerHour;
+    zoomWrap.style.display = state.mode==='sequence' ? 'flex' : 'none';
   }
 
   function dayBoundsISO(dateISO){
@@ -261,39 +289,111 @@
   function renderDay(){
     const dateISO = state.selectedDate;
     datePicker.value = dateISO;
-    const {start:ds, end:de} = dayBoundsISO(dateISO);
-    const dayMs = de - (new Date(dateISO+'T00:00:00').getTime()); // ~86,399,999
 
-    // Prepare rows per timer that has activity that day
-    const activeTimers = state.timers.filter(t => sessionsForDay(t, dateISO).length>0);
-    const rowCount = Math.max(activeTimers.length, 1);
+    // Toggle scaffolding based on mode
+    if(state.mode==='clock'){
+      hourGrid.style.display = '';
+      hourLabels.style.display = '';
+      zoomWrap.style.display = 'none';
+    } else {
+      hourGrid.style.display = 'none';
+      hourLabels.style.display = 'none';
+      zoomWrap.style.display = 'flex';
+    }
 
-    rowsEl.style.setProperty('--rowcount', rowCount);
     rowsEl.innerHTML = '';
 
-    let totalMs = 0;
+    if(state.mode==='clock'){
+      const {start:ds} = dayBoundsISO(dateISO);
+      const activeTimers = state.timers.filter(t => sessionsForDay(t, dateISO).length>0 || (t.running && isSelectedToday()));
+      const rowCount = Math.max(activeTimers.length, 1);
+      rowsEl.style.setProperty('--rowcount', rowCount);
+      let totalMs = 0;
+      activeTimers.forEach((t,rowIdx)=>{
+        const track = document.createElement('div'); track.className='row-track'; track.style.top = \`calc(\${rowIdx} * (100%/\${rowCount}))\`; track.style.height = \`calc(100%/\${rowCount})\`;
+        const segments = sessionsForDay(t, dateISO);
+        for(const s of segments){
+          const left = ((s.start - ds) / (24*3600*1000)) * 100;
+          const width = ((s.end - s.start) / (24*3600*1000)) * 100;
+          totalMs += (s.end - s.start);
+          const bar = document.createElement('div');
+          bar.className='bar';
+          bar.dataset.c = String(t.colorIndex%4);
+          bar.style.left = left + '%';
+          bar.style.width = Math.max(width, 0.5) + '%';
+          bar.title = \`\${t.name}: \${new Date(s.start).toLocaleTimeString()} – \${new Date(s.end).toLocaleTimeString()}\`;
+          bar.textContent = t.name;
+          track.appendChild(bar);
+        }
+        rowsEl.appendChild(track);
+      });
+      daySummary.textContent = \`\${activeTimers.length} timer(s) • \${formatHMS(totalMs/1000)} tracked\`;
+      return;
+    }
 
-    activeTimers.forEach((t,rowIdx)=>{
-      const track = document.createElement('div'); track.className='row-track'; track.style.top = `calc(${rowIdx} * (100%/${rowCount}))`; track.style.height = `calc(100%/${rowCount})`;
-      const segments = sessionsForDay(t, dateISO);
-      for(const s of segments){
-        const left = ((s.start - ds) / (24*3600*1000)) * 100;
-        const width = ((s.end - s.start) / (24*3600*1000)) * 100;
-        totalMs += (s.end - s.start);
-        const bar = document.createElement('div');
-        bar.className='bar';
-        bar.dataset.c = String(t.colorIndex%4);
-        bar.style.left = left + '%';
-        bar.style.width = Math.max(width, 0.5) + '%';
-        const label = `${t.name}`;
-        bar.title = `${label}: ${new Date(s.start).toLocaleTimeString()} – ${new Date(s.end).toLocaleTimeString()}`;
-        bar.textContent = label;
-        track.appendChild(bar);
-      }
-      rowsEl.appendChild(track);
+    // Sequence mode (order sessions left-to-right regardless of wall clock)
+    const allSessions = [];
+    state.timers.forEach(t=>{
+      const segs = sessionsForDay(t, dateISO).map(s=>({...s, timer:t}));
+      allSessions.push(...segs);
+    });
+    // Sort by start time for the day
+    allSessions.sort((a,b)=>a.start-b.start);
+
+    // Compute total tracked ms and container width by pxPerHour
+    let totalMs = allSessions.reduce((acc,s)=>acc + (s.end - s.start), 0);
+    if(isSelectedToday()){
+      // include any currently running segment time
+      state.timers.forEach(t=>{ if(t.running){ totalMs += (Date.now()-t.runStart); }});
+    }
+
+    const pxPerHour = state.pxPerHour; // user-controlled
+    const pxPerMs = pxPerHour / (3600*1000);
+    const contentWidth = Math.max(600, Math.ceil(totalMs * pxPerMs) + 200);
+
+    const track = document.createElement('div');
+    track.className = 'track';
+    track.style.width = contentWidth + 'px';
+
+    // Draw tick marks every hour for reference
+    const tickbar = document.createElement('div'); tickbar.className='tickbar';
+    const hours = Math.ceil(contentWidth / pxPerHour);
+    for(let i=0;i<=hours;i++){
+      const tdiv = document.createElement('div'); tdiv.style.left = (i*pxPerHour)+ 'px';
+      tickbar.appendChild(tdiv);
+    }
+    track.appendChild(tickbar);
+
+    let cursor = 0; // px from left
+    allSessions.forEach(s=>{
+      const wpx = Math.max(4, Math.round((s.end - s.start) * pxPerMs));
+      const bar = document.createElement('div'); bar.className='bar';
+      bar.dataset.c = String(s.timer.colorIndex%4);
+      bar.style.left = cursor + 'px';
+      bar.style.width = wpx + 'px';
+      bar.textContent = s.timer.name;
+      bar.title = \`\${s.timer.name}: \${new Date(s.start).toLocaleTimeString()} – \${new Date(s.end).toLocaleTimeString()}\`;
+      track.appendChild(bar);
+      cursor += wpx + 6; // small gap
     });
 
-    daySummary.textContent = `${activeTimers.length} timer(s) • ${formatHMS(totalMs/1000)} tracked`;
+    // Add a growing bar if something is currently running and today is selected
+    if(isSelectedToday()){
+      const running = state.timers.filter(t=>t.running);
+      running.forEach(t=>{
+        const start = t.runStart; const end = Date.now();
+        const wpx = Math.max(4, Math.round((end - start) * pxPerMs));
+        const bar = document.createElement('div'); bar.className='bar'; bar.dataset.c = String(t.colorIndex%4);
+        bar.style.left = cursor + 'px'; bar.style.width = wpx + 'px';
+        bar.textContent = t.name;
+        bar.title = \`\${t.name}: \${new Date(start).toLocaleTimeString()} – \${new Date(end).toLocaleTimeString()}\`;
+        track.appendChild(bar);
+        // do not advance cursor so this bar can grow in place each tick
+      });
+    }
+
+    rowsEl.appendChild(track);
+    daySummary.textContent = \`\${allSessions.length} block(s) • \${formatHMS(totalMs/1000)} tracked\`;
   }
 
   // ====== Export / Import ======
@@ -302,7 +402,7 @@
     const blob = new Blob([data], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `multitimer-${Date.now()}.json`; a.click();
+    a.href = url; a.download = \`multitimer-\${Date.now()}.json\`; a.click();
     URL.revokeObjectURL(url);
   });
 
@@ -319,11 +419,14 @@
     reader.readAsText(file);
   });
 
-  // ====== Date Controls ======
+  // ====== Date & Mode Controls ======
   datePicker.addEventListener('change', (e)=>{ state.selectedDate = e.target.value; save(); renderDay(); });
   document.getElementById('prevDay').addEventListener('click', ()=>{ shiftSelectedDate(-1); });
   document.getElementById('nextDay').addEventListener('click', ()=>{ shiftSelectedDate(1); });
   document.getElementById('todayBtn').addEventListener('click', ()=>{ state.selectedDate = todayISO(); save(); renderDay(); });
+  modeSeq.addEventListener('change', ()=>{ if(modeSeq.checked){ state.mode='sequence'; save(); renderScaffolding(); renderDay(); }});
+  modeClock.addEventListener('change', ()=>{ if(modeClock.checked){ state.mode='clock'; save(); renderScaffolding(); renderDay(); }});
+  zoom.addEventListener('input', ()=>{ state.pxPerHour = Number(zoom.value); save(); renderDay(); });
 
   function shiftSelectedDate(delta){
     const [y,m,d] = state.selectedDate.split('-').map(Number);
